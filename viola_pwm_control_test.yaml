@@ -1,0 +1,66 @@
+esphome:
+  name: viola-pwm-control-test
+  friendly_name: VIOLA PWM-Steuerung Test
+  on_boot:
+    priority: 800
+    then:
+      - output.set_level:
+          id: ww_pwm
+          level: 0%
+      - output.set_level:
+          id: kw_pwm
+          level: 0%
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "VIOLA PWM Control Fallback"
+    password: "viola-control-test"
+
+captive_portal:
+
+# R6 / O2 / L1 = Warmweiß
+# R11 / O1 / L2 = Kaltweiß
+# The external ~7.5 kOhm resistors must remain in series between these
+# GPIOs and the transistor bases. Never connect a GPIO directly to O1/O2.
+output:
+  - platform: ledc
+    id: ww_pwm
+    pin: GPIO4
+    frequency: 2048Hz
+
+  - platform: ledc
+    id: kw_pwm
+    pin: GPIO5
+    frequency: 2048Hz
+
+light:
+  - platform: monochromatic
+    name: "VIOLA Warmweiß Test"
+    id: ww_light
+    output: ww_pwm
+    gamma_correct: 1.0
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+
+  - platform: monochromatic
+    name: "VIOLA Kaltweiß Test"
+    id: kw_light
+    output: kw_pwm
+    gamma_correct: 1.0
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF

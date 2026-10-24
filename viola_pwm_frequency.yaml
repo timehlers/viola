@@ -1,0 +1,50 @@
+esphome:
+  name: viola-pwm-frequency
+  friendly_name: VIOLA PWM-Frequenz
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "VIOLA PWM Frequenz Fallback"
+    password: "viola-frequency-test"
+
+captive_portal:
+
+# GPIO4 is connected to the midpoint of the 10 kOhm / 20 kOhm divider.
+# Never connect U6 Pin 6 directly to the ESP32 GPIO.
+sensor:
+  - platform: pulse_meter
+    pin:
+      number: GPIO4
+      mode:
+        input: true
+        pullup: false
+        pulldown: false
+    name: "VIOLA U7 PWM-Frequenz"
+    id: viola_u7_frequency
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 1
+    internal_filter: 1us
+    timeout: 2s
+    filters:
+      - multiply: 0.0166666667
+      - throttle_average: 1s
+    on_value:
+      then:
+        - logger.log:
+            format: "VIOLA U7 PWM-Frequenz: %.1f Hz"
+            args: ["x"]

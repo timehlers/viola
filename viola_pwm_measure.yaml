@@ -1,0 +1,93 @@
+esphome:
+  name: viola-pwm-measure
+  friendly_name: VIOLA PWM-Messung
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "VIOLA PWM Fallback"
+    password: "viola-pwm-test"
+
+captive_portal:
+
+# U7/U8 Pin 2 must reach these GPIOs through a 10 kOhm / 20 kOhm
+# voltage divider. Never connect the lamp signal directly to the ESP32.
+# GPIO4 and GPIO5 are intentionally used as measurement inputs only.
+sensor:
+  - platform: pulse_meter
+    pin:
+      number: GPIO4
+      allow_other_uses: true
+      mode:
+        input: true
+        pullup: false
+        pulldown: false
+    name: "VIOLA U7 Frequenz"
+    id: u7_frequency
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 1
+    internal_filter: 10us
+    timeout: 2s
+    filters:
+      - multiply: 0.0166666667  # pulse_meter default is pulses/min
+      - throttle_average: 1s
+
+  - platform: duty_cycle
+    pin:
+      number: GPIO4
+      allow_other_uses: true
+      mode:
+        input: true
+        pullup: false
+        pulldown: false
+    name: "VIOLA U7 Tastgrad"
+    id: u7_duty
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: 1s
+
+  - platform: pulse_meter
+    pin:
+      number: GPIO5
+      allow_other_uses: true
+      mode:
+        input: true
+        pullup: false
+        pulldown: false
+    name: "VIOLA U8 Frequenz"
+    id: u8_frequency
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 1
+    internal_filter: 10us
+    timeout: 2s
+    filters:
+      - multiply: 0.0166666667
+      - throttle_average: 1s
+
+  - platform: duty_cycle
+    pin:
+      number: GPIO5
+      allow_other_uses: true
+      mode:
+        input: true
+        pullup: false
+        pulldown: false
+    name: "VIOLA U8 Tastgrad"
+    id: u8_duty
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: 1s

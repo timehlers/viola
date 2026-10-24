@@ -1,0 +1,334 @@
+esphome:
+  name: viola-lampe
+  friendly_name: VIOLA Lampe
+  on_boot:
+    priority: 800
+    then:
+      - output.set_level:
+          id: ww_pwm
+          level: 0%
+      - output.set_level:
+          id: kw_pwm
+          level: 0%
+      - switch.turn_off: jieli_power
+
+globals:
+  # Zuletzt gespeicherte Lichtwerte. Sie bleiben über Neustarts erhalten.
+  - id: saved_ww
+    type: float
+    restore_value: yes
+    initial_value: '1.0'
+
+  - id: saved_kw
+    type: float
+    restore_value: yes
+    initial_value: '1.0'
+
+  - id: current_ww
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+
+  - id: current_kw
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+
+  - id: lamp_on
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: activation_window
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: activation_window_until
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+  - id: activation_taps
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: touch_pressed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: hold_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: touch_started_at
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+  - id: last_dim_at
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "VIOLA Lampe Fallback"
+    password: "viola-lampe-test"
+
+captive_portal:
+
+output:
+  - platform: ledc
+    id: ww_pwm
+    pin: GPIO4
+    frequency: 12000Hz
+
+  - platform: ledc
+    id: kw_pwm
+    pin: GPIO5
+    frequency: 12000Hz
+
+light:
+  - platform: monochromatic
+    name: "VIOLA Warmweiß"
+    id: ww_light
+    output: ww_pwm
+    gamma_correct: 1.0
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+    on_state:
+      then:
+        - lambda: |-
+            id(current_ww) = id(ww_light).current_values.get_brightness();
+            if (id(ww_light).current_values.is_on()) {
+              id(lamp_on) = true;
+              if (!id(touch_pressed)) {
+                id(saved_ww) = id(current_ww);
+              }
+            } else if (!id(kw_light).current_values.is_on()) {
+              id(lamp_on) = false;
+              id(activation_window) = false;
+              id(activation_taps) = 0;
+            }
+
+  - platform: monochromatic
+    name: "VIOLA Kaltweiß"
+    id: kw_light
+    output: kw_pwm
+    gamma_correct: 1.0
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+    on_state:
+      then:
+        - lambda: |-
+            id(current_kw) = id(kw_light).current_values.get_brightness();
+            if (id(kw_light).current_values.is_on()) {
+              id(lamp_on) = true;
+              if (!id(touch_pressed)) {
+                id(saved_kw) = id(current_kw);
+              }
+            } else if (!id(ww_light).current_values.is_on()) {
+              id(lamp_on) = false;
+              id(activation_window) = false;
+              id(activation_taps) = 0;
+            }
+
+switch:
+  - platform: gpio
+    name: "VIOLA Jieli Versorgung"
+    id: jieli_power
+    pin:
+      number: GPIO0
+      mode:
+        output: true
+    restore_mode: ALWAYS_OFF
+    inverted: false
+
+  - platform: template
+    name: "VIOLA Lampe letzter Zustand"
+    id: lamp_last_state_switch
+    lambda: |-
+      return id(lamp_on);
+    turn_on_action:
+      - lambda: |-
+          id(lamp_on) = true;
+          id(activation_window) = false;
+          id(activation_taps) = 0;
+      - script.execute:
+          id: set_lamp_levels
+          ww_level: !lambda "return id(saved_ww);"
+          kw_level: !lambda "return id(saved_kw);"
+    turn_off_action:
+      - lambda: |-
+          id(saved_ww) = id(current_ww);
+          id(saved_kw) = id(current_kw);
+          id(lamp_on) = false;
+          id(activation_window) = false;
+          id(activation_taps) = 0;
+      - light.turn_off: ww_light
+      - light.turn_off: kw_light
+
+binary_sensor:
+  - platform: gpio
+    name: "VIOLA Touch"
+    id: viola_touch
+    pin:
+      number: GPIO1
+      mode:
+        input: true
+        pulldown: true
+    filters:
+      - delayed_on: 30ms
+      - delayed_off: 100ms
+    on_press:
+      then:
+        - lambda: |-
+            const uint32_t now = millis();
+            id(touch_pressed) = true;
+            id(hold_active) = false;
+            id(touch_started_at) = now;
+
+            // Erste Berührung im ausgeschalteten Zustand: gespeicherten
+            // Zustand sofort wiederherstellen und Zeitfenster öffnen.
+            if (!id(lamp_on)) {
+              id(current_ww) = id(saved_ww);
+              id(current_kw) = id(saved_kw);
+              id(lamp_on) = true;
+              id(activation_window) = true;
+              id(activation_window_until) = now + 1000;
+              id(activation_taps) = 0;
+              id(set_lamp_levels)->execute(id(saved_ww), id(saved_kw));
+            }
+
+    on_release:
+      then:
+        - lambda: |-
+            const uint32_t now = millis();
+            id(touch_pressed) = false;
+
+            // Langes Halten dimmt; es erzeugt keinen Farbwechsel.
+            if (id(hold_active)) {
+              id(hold_active) = false;
+              return;
+            }
+
+            // Kurze Berührung innerhalb des Aktivierungsfensters:
+            // Die erste Berührung war der gespeicherte Zustand. Weitere
+            // Berührungen wählen exakt KW -> NW -> WW.
+            if (id(activation_window)) {
+              if (id(activation_taps) == 0) {
+                id(activation_taps) = 1;
+              } else {
+                id(activation_taps)++;
+                if (id(activation_taps) == 2) {
+                  id(set_lamp_levels)->execute(0.0f, 1.0f);  // KW
+                } else if (id(activation_taps) == 3) {
+                  id(set_lamp_levels)->execute(1.0f, 1.0f);  // NW
+                } else if (id(activation_taps) == 4) {
+                  id(set_lamp_levels)->execute(1.0f, 0.0f);  // WW
+                  // Nach WW ist die Farbfolge beendet. Der nächste kurze
+                  // Touch darf daher normal ausschalten.
+                  id(activation_window) = false;
+                  id(activation_taps) = 0;
+                  return;
+                }
+              }
+              id(activation_window_until) = now + 1000;
+              return;
+            }
+
+            // Normaler kurzer Touch im eingeschalteten Zustand: speichern und aus.
+            if (id(lamp_on)) {
+              id(saved_ww) = id(current_ww);
+              id(saved_kw) = id(current_kw);
+              id(lamp_on) = false;
+              auto ww_off = id(ww_light).turn_off();
+              ww_off.perform();
+              auto kw_off = id(kw_light).turn_off();
+              kw_off.perform();
+            }
+
+script:
+  - id: set_lamp_levels
+    mode: restart
+    parameters:
+      ww_level: float
+      kw_level: float
+    then:
+      - lambda: |-
+          id(current_ww) = std::max(0.0f, std::min(1.0f, ww_level));
+          id(current_kw) = std::max(0.0f, std::min(1.0f, kw_level));
+      - if:
+          condition:
+            lambda: 'return ww_level > 0.001f;'
+          then:
+            - light.turn_on:
+                id: ww_light
+                brightness: !lambda 'return ww_level;'
+                transition_length: 0s
+          else:
+            - light.turn_off: ww_light
+      - if:
+          condition:
+            lambda: 'return kw_level > 0.001f;'
+          then:
+            - light.turn_on:
+                id: kw_light
+                brightness: !lambda 'return kw_level;'
+                transition_length: 0s
+          else:
+            - light.turn_off: kw_light
+
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+
+          // Nach einer Sekunde ohne weitere Berührung endet das Farbwahlfenster.
+          if (id(activation_window) && !id(touch_pressed) &&
+              (int32_t)(now - id(activation_window_until)) >= 0) {
+            id(activation_window) = false;
+            id(activation_taps) = 0;
+          }
+
+          // Halten bei eingeschalteter Lampe startet immer Dimmen – auch
+          // nachdem das Farbwahlfenster bereits abgelaufen ist.
+          if (id(touch_pressed) && id(lamp_on) && !id(hold_active) &&
+              (uint32_t)(now - id(touch_started_at)) >= 400) {
+            id(hold_active) = true;
+            id(last_dim_at) = now;
+          }
+
+          // Beide aktiven Kanäle proportional dimmen, aber niemals unter 1 %.
+          if (id(touch_pressed) && id(hold_active) &&
+              (uint32_t)(now - id(last_dim_at)) >= 100) {
+            id(last_dim_at) = now;
+            const float maximum = std::max(id(current_ww), id(current_kw));
+            if (maximum > 0.01f) {
+              const float next_maximum = std::max(0.01f, maximum - 0.02f);
+              const float factor = next_maximum / maximum;
+              id(set_lamp_levels)->execute(id(current_ww) * factor,
+                                           id(current_kw) * factor);
+            }
+          }
+
